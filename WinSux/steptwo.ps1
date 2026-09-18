@@ -1162,18 +1162,52 @@ powercfg /setdcvalueindex 99999999-9999-9999-9999-999999999999 de830923-a562-41a
         ## services.msc
 
 # compile and create service
-Start-Process -Wait "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" -ArgumentList "-out:C:\Windows\SetTimerResolutionService.exe C:\Windows\Temp\settimerresolutionservice.cs" -WindowStyle Hidden
+$CscCandidates = @(
+(Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'),
+(Join-Path $env:SystemRoot 'Microsoft.NET\Framework\v4.0.30319\csc.exe')
+)
+$CscPath = $CscCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+$TimerSourcePath = Join-Path $env:SystemRoot 'Temp\settimerresolutionservice.cs'
+$TimerServicePath = Join-Path $env:SystemRoot 'SetTimerResolutionService.exe'
+$TimerServiceReady = $false
+
+if ($CscPath -and (Test-Path -LiteralPath $TimerSourcePath)) {
+$FrameworkPath = Split-Path -Parent $CscPath
+$ReferenceArguments = @(
+'System.dll',
+'System.Configuration.Install.dll',
+'System.Management.dll',
+'System.ServiceProcess.dll'
+) | ForEach-Object {
+$ReferencePath = Join-Path $FrameworkPath $_
+if (Test-Path -LiteralPath $ReferencePath) { "/reference:$ReferencePath" }
+}
+$CompileArguments = @(
+'/nologo',
+'/platform:anycpu',
+"/out:$TimerServicePath",
+$TimerSourcePath
+) + $ReferenceArguments
+$CompileResult = Start-Process -FilePath $CscPath -Wait -PassThru -ArgumentList $CompileArguments -WindowStyle Hidden
+$TimerServiceReady = $CompileResult.ExitCode -eq 0 -and (Test-Path -LiteralPath $TimerServicePath)
+}
+
+if (-not $TimerServiceReady) {
+Write-Host "Timer resolution service could not be compiled; skipping service installation." -ForegroundColor Yellow
+}
 
 # remove old service if exists
-if (Get-Service -Name "Set Timer Resolution Service" -ErrorAction SilentlyContinue) {
+if ($TimerServiceReady -and (Get-Service -Name "Set Timer Resolution Service" -ErrorAction SilentlyContinue)) {
     sc.exe delete "Set Timer Resolution Service" | Out-Null
     Start-Sleep -Seconds 2
 }
 
 # install and start service
-New-Service -Name "Set Timer Resolution Service" -BinaryPathName "$env:SystemDrive\Windows\SetTimerResolutionService.exe" -ErrorAction SilentlyContinue | Out-Null
+if ($TimerServiceReady) {
+New-Service -Name "Set Timer Resolution Service" -BinaryPathName $TimerServicePath -ErrorAction SilentlyContinue | Out-Null
 Set-Service -Name "Set Timer Resolution Service" -StartupType Auto -ErrorAction SilentlyContinue | Out-Null
 Set-Service -Name "Set Timer Resolution Service" -Status Running -ErrorAction SilentlyContinue | Out-Null
+}
 
 # enable global timer resolution requests
 cmd /c "reg add `"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\kernel`" /v `"GlobalTimerResolutionRequests`" /t REG_DWORD /d `"1`" /f >nul 2>&1"

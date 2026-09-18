@@ -150,4 +150,10 @@ cmd /c "bcdedit /deletevalue {current} safeboot >nul 2>&1"
         Write-Host "DDU & RESTARTING`n" -ForegroundColor Red
 
 # uninstall soundblaster realtek intel amd nvidia drivers & restart
-Start-Process "$env:SystemRoot\Temp\ddu\Display Driver Uninstaller.exe" -ArgumentList "-CleanSoundBlaster -CleanRealtek -CleanAllGpus -Restart" -Wait
+$DduPath = Join-Path $env:SystemRoot 'Temp\ddu\Display Driver Uninstaller.exe'
+if (Test-Path -LiteralPath $DduPath) {
+Start-Process $DduPath -ArgumentList "-CleanSoundBlaster -CleanRealtek -CleanAllGpus -Restart" -Wait
+} else {
+Write-Host "DDU was not extracted; continuing without driver cleanup." -ForegroundColor Yellow
+shutdown -r -t 00
+}
